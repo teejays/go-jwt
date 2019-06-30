@@ -6,12 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"reflect"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/mitchellh/mapstructure"
 	"github.com/teejays/clog"
 )
 
@@ -265,36 +263,6 @@ func getTokenParts(token string) (partedToken, error) {
 	tokenP.signatureB64 = parts[2]
 
 	return tokenP, nil
-}
-
-func mapToStruct(src interface{}, dest interface{}) error {
-	stringToDateTimeHook := func(
-		f reflect.Type,
-		t reflect.Type,
-		data interface{}) (interface{}, error) {
-		if t == reflect.TypeOf(time.Time{}) && f == reflect.TypeOf("") {
-			return time.Parse(time.RFC3339, data.(string))
-		}
-
-		return data, nil
-	}
-
-	config := mapstructure.DecoderConfig{
-		DecodeHook: stringToDateTimeHook,
-		Result:     dest,
-	}
-
-	decoder, err := mapstructure.NewDecoder(&config)
-	if err != nil {
-		return err
-	}
-	err = decoder.Decode(src)
-	if err != nil {
-		return fmt.Errorf("could not convert map to a struct: %v", err)
-	}
-
-	return nil
-
 }
 
 func (c *client) hash(message []byte) ([]byte, error) {
