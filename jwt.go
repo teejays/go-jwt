@@ -155,6 +155,27 @@ func (c *client) getSignatureBase64(headerB64, payloadB64 string) (string, error
 }
 
 func (c *client) VerifyAndDecode(token string, v interface{}) error {
+	var err error
+
+	err = c.VerifySignature(token)
+	if err != nil {
+		return err
+	}
+
+	err = c.VerifyTimestamps(token)
+	if err != nil {
+		return err
+	}
+
+	err = c.Decode(token, v)
+	if err != nil {
+		return fmt.Errorf("jwt-go: could not decode the verified claim: %v", err)
+	}
+
+	return nil
+}
+
+func (c *client) VerifySignature(token string) error {
 
 	// Splity the token into three parts (header, payload, signature)
 	parts := strings.Split(token, ".")
@@ -177,32 +198,73 @@ func (c *client) VerifyAndDecode(token string, v interface{}) error {
 		return fmt.Errorf("signature verification failed")
 	}
 
-	// Get the paylaod
-	payloadJSON, err := base64.StdEncoding.DecodeString(payloadB64)
-	if err != nil {
-		return err
-	}
+	return nil
 
+}
+
+func (c *client) VerifyTimestamps(token string) error {
+
+	// Unmarshal payload into basic struct (ignoring any other details)
 	var payload BasicPayload
-	err = json.Unmarshal(payloadJSON, &payload)
+	err := cl.Decode(token, &payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("jwt-go: could not decode claim intom BasicPayload: %v", err)
 	}
 
-	clog.Debugf("JWT Token Expiry: %v", payload.ExpireAt)
 	// Make sure that the JWT token has not expired
+	clog.Debugf("JWT Token Expiry: %v", payload.ExpireAt)
 	if payload.ExpireAt.Before(time.Now()) {
 		return fmt.Errorf("JWT Token as expired")
 	}
 
-	// Transfer the payload data into the user passed struct
-	err = mapToStruct(payload.Data, v)
+	clog.Debugf("JWT Token NotBefore: %v", payload.NotBefore)
+	if payload.NotBefore.After(time.Now()) {
+		return fmt.Errorf("JWT Token as is not yet valid")
+	}
+
+	return nil
+
+}
+
+func (c *client) Decode(token string, v interface{}) error {
+
+	tokenP, err := getTokenParts(token)
+	if err != nil {
+		return err
+	}
+
+	// Get the paylaod
+	payloadJSON, err := base64.StdEncoding.DecodeString(tokenP.payloadB64)
+	if err != nil {
+		return err
+	}
+
+	err = json.Unmarshal(payloadJSON, &v)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
 
+type partedToken struct {
+	headerB64, payloadB64, signatureB64 string
+}
+
+func getTokenParts(token string) (partedToken, error) {
+	var tokenP partedToken
+
+	// Splity the token into three parts (header, payload, signature)
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return tokenP, fmt.Errorf("invalid number of jwt token part found: expected %d, got %d", 3, len(parts))
+	}
+
+	tokenP.headerB64 = parts[0]
+	tokenP.payloadB64 = parts[1]
+	tokenP.signatureB64 = parts[2]
+
+	return tokenP, nil
 }
 
 func mapToStruct(src interface{}, dest interface{}) error {
