@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mitchellh/mapstructure"
 	"github.com/teejays/clog"
 )
@@ -20,13 +21,28 @@ const headerTyp = "JWT"
 const headerAlg = "HS256"
 
 type Header struct {
-	typ string
-	alg string
+	Type      string `json:"typ"`
+	Algorithm string `json:"alg"`
 }
 
-type Payload struct {
-	Data   interface{}
-	Expiry time.Time
+type BasicPayload struct {
+	Issuer    string    `json:"iss"`
+	Subject   string    `json:"sub"`
+	Audience  string    `json:"aud"`
+	ExpireAt  time.Time `json:"exp"`
+	NotBefore time.Time `json:"nbf"`
+	IssuedAt  time.Time `json:"iat"`
+	UniqueID  string    `json:"jti"`
+
+	Data interface{} `json:"data"`
+}
+
+// NewBasicPayload creates a new payload for the JWT token
+func NewBasicPayload(data interface{}) *BasicPayload {
+	return &BasicPayload{
+		UniqueID: uuid.New().String(),
+		Data:     data,
+	}
 }
 
 type client struct {
@@ -76,22 +92,22 @@ func GetClient() (*client, error) {
 	return cl, nil
 }
 
-func (c *client) CreateToken(payloadData interface{}) (string, error) {
+func (c *client) CreateToken(payload *BasicPayload) (string, error) {
 
+	now := time.Now()
 	// Create the Header
 	var header = Header{
-		typ: headerTyp,
-		alg: headerAlg,
+		Type:      headerTyp,
+		Algorithm: headerAlg,
 	}
 
 	// Create the Payload
-	var payload = Payload{
-		Data:   payloadData,
-		Expiry: time.Now().Add(c.lifespan),
-	}
+	payload.ExpireAt = now.Add(c.lifespan)
+	payload.IssuedAt = now
+	payload.NotBefore = now
 
 	clog.Debugf("JWT: Creating Token: Lifespan: %v", c.lifespan)
-	clog.Debugf("JWT: Creating Token: Expiry: %v", payload.Expiry)
+	clog.Debugf("JWT: Creating Token: Expiry: %v", payload.ExpireAt)
 
 	// Convert Header to JSON and then base64
 	headerJSON, err := json.Marshal(header)
@@ -99,6 +115,9 @@ func (c *client) CreateToken(payloadData interface{}) (string, error) {
 		return "", err
 	}
 	headerB64 := base64.StdEncoding.EncodeToString(headerJSON)
+	clog.Infof("Header: %+v", header)
+	clog.Infof("Header JSON: %s", string(headerJSON))
+	clog.Infof("Header B64: %s", headerB64)
 
 	// Convert Payload to JSON and then base64
 	payloadJSON, err := json.Marshal(payload)
@@ -164,15 +183,15 @@ func (c *client) VerifyAndDecode(token string, v interface{}) error {
 		return err
 	}
 
-	var payload Payload
+	var payload BasicPayload
 	err = json.Unmarshal(payloadJSON, &payload)
 	if err != nil {
 		return err
 	}
 
-	clog.Debugf("JWT Token Expiry: %v", payload.Expiry)
+	clog.Debugf("JWT Token Expiry: %v", payload.ExpireAt)
 	// Make sure that the JWT token has not expired
-	if payload.Expiry.Before(time.Now()) {
+	if payload.ExpireAt.Before(time.Now()) {
 		return fmt.Errorf("JWT Token as expired")
 	}
 
