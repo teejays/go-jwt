@@ -9,38 +9,62 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/uuid"
 	"github.com/teejays/clog"
 )
 
-// const SECRET_KEY = "cheese steak jimmy's"
+const gHeaderTyp = "JWT"
+const gHeaderAlg = "HS256"
 
-const headerTyp = "JWT"
-const headerAlg = "HS256"
-
+// Header represents the header part of a JWT
 type Header struct {
 	Type      string `json:"typ"`
 	Algorithm string `json:"alg"`
 }
 
-type BasicPayload struct {
-	Issuer    string    `json:"iss"`
+// Claim represents the claim part of JWT. Since we want to allow use of custom claim types,
+// this is an interface with just one requirement - we should be able to get the basic/minimum
+// required fields for a JWT claim.
+type Claim interface {
+	GetBaseClaim() *BaseClaim
+	VerifyTimestamps() error
+}
+
+// BaseClaim represents all the minimum required fields for a JWT claim, as per RFC 7519 standard.
+type BaseClaim struct {
+	// Issuer is the authority that generated the JWT
+	Issuer string `json:"iss"`
+	// Subject is the main entity which is using the JWT, e.g. user
 	Subject   string    `json:"sub"`
 	Audience  string    `json:"aud"`
 	ExpireAt  time.Time `json:"exp"`
 	NotBefore time.Time `json:"nbf"`
 	IssuedAt  time.Time `json:"iat"`
-	UniqueID  string    `json:"jti"`
-
-	Data interface{} `json:"data"`
+	// UniqueID is a unique identifier for the JWT
+	UniqueID string `json:"jti"`
 }
 
-// NewBasicPayload creates a new payload for the JWT token
-func NewBasicPayload(data interface{}) *BasicPayload {
-	return &BasicPayload{
-		UniqueID: uuid.New().String(),
-		Data:     data,
+// GetBaseClaim returns the BaseClaim type, which should contain all the
+// minimum required JWT claim fields
+func (bc *BaseClaim) GetBaseClaim() *BaseClaim {
+	return bc
+}
+
+// VerifyTimestamps verifies that the claim is valid i.e. not expired and not too early
+func (bc *BaseClaim) VerifyTimestamps() error {
+
+	// Make sure that the JWT token has not expired
+	clog.Debugf("JWT: token expiry: %v", bc.ExpireAt)
+	if bc.ExpireAt.Before(time.Now()) {
+		return fmt.Errorf("JWT has expired")
 	}
+
+	clog.Debugf("JWT: token valid not before: %v", bc.NotBefore)
+	if bc.NotBefore.After(time.Now()) {
+		return fmt.Errorf("JWT is not valid yet")
+	}
+
+	return nil
+
 }
 
 type client struct {
@@ -90,56 +114,59 @@ func GetClient() (*client, error) {
 	return cl, nil
 }
 
-func (c *client) CreateToken(payload *BasicPayload) (string, error) {
+func (c *client) CreateToken(claim Claim) (string, error) {
+
+	baseClaim := claim.GetBaseClaim()
 
 	now := time.Now()
 	// Create the Header
 	var header = Header{
-		Type:      headerTyp,
-		Algorithm: headerAlg,
+		Type:      gHeaderTyp,
+		Algorithm: gHeaderAlg,
 	}
 
 	// Create the Payload
-	payload.ExpireAt = now.Add(c.lifespan)
-	payload.IssuedAt = now
-	payload.NotBefore = now
+	baseClaim.ExpireAt = now.Add(c.lifespan)
+	baseClaim.IssuedAt = now
+	baseClaim.NotBefore = now
 
 	clog.Debugf("JWT: Creating Token: Lifespan: %v", c.lifespan)
-	clog.Debugf("JWT: Creating Token: Expiry: %v", payload.ExpireAt)
+	clog.Debugf("JWT: Creating Token: Expiry: %v", baseClaim.ExpireAt)
 
 	// Convert Header to JSON and then base64
 	headerJSON, err := json.Marshal(header)
 	if err != nil {
 		return "", err
 	}
+	// TODO: Encode directly to []byte and use those
 	headerB64 := base64.StdEncoding.EncodeToString(headerJSON)
-	clog.Infof("Header: %+v", header)
-	clog.Infof("Header JSON: %s", string(headerJSON))
-	clog.Infof("Header B64: %s", headerB64)
+	clog.Debugf("JWT: Creating Token: Header: %+v", header)
 
 	// Convert Payload to JSON and then base64
-	payloadJSON, err := json.Marshal(payload)
+	clog.Debugf("JWT: Creating Token: Claim: %+v", claim)
+	claimJSON, err := json.Marshal(claim)
 	if err != nil {
 		return "", err
 	}
-	payloadB64 := base64.StdEncoding.EncodeToString(payloadJSON)
+	// TODO: Encode directly to []byte and use those
+	claimB64 := base64.StdEncoding.EncodeToString(claimJSON)
 
 	// Create the Signature
-	signatureB64, err := c.getSignatureBase64(headerB64, payloadB64)
+	signatureB64, err := c.getSignatureBase64(headerB64, claimB64)
 	if err != nil {
 		return "", err
 	}
 
-	token := headerB64 + "." + payloadB64 + "." + signatureB64
+	token := headerB64 + "." + claimB64 + "." + signatureB64
 
 	return token, nil
 
 }
 
-func (c *client) getSignatureBase64(headerB64, payloadB64 string) (string, error) {
+func (c *client) getSignatureBase64(headerB64, claimB64 string) (string, error) {
 	// Create the Signature
 	// - step 1: header . payload
-	data := []byte(headerB64 + "." + payloadB64)
+	data := []byte(headerB64 + "." + claimB64)
 	// - step 2: hash(data)
 	hashData, err := c.hash(data)
 	if err != nil {
@@ -152,7 +179,7 @@ func (c *client) getSignatureBase64(headerB64, payloadB64 string) (string, error
 	return signatureB64, nil
 }
 
-func (c *client) VerifyAndDecode(token string, v interface{}) error {
+func (c *client) VerifyAndDecode(token string, claim Claim) error {
 	var err error
 
 	err = c.VerifySignature(token)
@@ -160,14 +187,14 @@ func (c *client) VerifyAndDecode(token string, v interface{}) error {
 		return err
 	}
 
-	err = c.VerifyTimestamps(token)
+	err = c.Decode(token, claim)
 	if err != nil {
-		return err
+		return fmt.Errorf("jwt: could not decode the claim: %v", err)
 	}
 
-	err = c.Decode(token, v)
+	err = claim.VerifyTimestamps()
 	if err != nil {
-		return fmt.Errorf("jwt-go: could not decode the verified claim: %v", err)
+		return err
 	}
 
 	return nil
@@ -176,48 +203,21 @@ func (c *client) VerifyAndDecode(token string, v interface{}) error {
 func (c *client) VerifySignature(token string) error {
 
 	// Splity the token into three parts (header, payload, signature)
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return fmt.Errorf("invalid number of jwt token part found: expected %d, got %d", 3, len(parts))
-	}
-	headerB64 := parts[0]
-	payloadB64 := parts[1]
-	signatureB64 := parts[2]
-
-	// Get new signature and compare
-	newSignatureB64, err := c.getSignatureBase64(headerB64, payloadB64)
+	tokenP, err := getTokenParts(token)
 	if err != nil {
 		return err
 	}
 
-	isSame := hmac.Equal([]byte(newSignatureB64), []byte(signatureB64))
+	// Get new signature and compare
+	newSignatureB64, err := c.getSignatureBase64(tokenP.headerB64, tokenP.payloadB64)
+	if err != nil {
+		return err
+	}
+
+	isSame := hmac.Equal([]byte(newSignatureB64), []byte(tokenP.signatureB64))
 
 	if !isSame {
 		return fmt.Errorf("signature verification failed")
-	}
-
-	return nil
-
-}
-
-func (c *client) VerifyTimestamps(token string) error {
-
-	// Unmarshal payload into basic struct (ignoring any other details)
-	var payload BasicPayload
-	err := cl.Decode(token, &payload)
-	if err != nil {
-		return fmt.Errorf("jwt-go: could not decode claim intom BasicPayload: %v", err)
-	}
-
-	// Make sure that the JWT token has not expired
-	clog.Debugf("JWT Token Expiry: %v", payload.ExpireAt)
-	if payload.ExpireAt.Before(time.Now()) {
-		return fmt.Errorf("JWT Token as expired")
-	}
-
-	clog.Debugf("JWT Token NotBefore: %v", payload.NotBefore)
-	if payload.NotBefore.After(time.Now()) {
-		return fmt.Errorf("JWT Token as is not yet valid")
 	}
 
 	return nil
@@ -239,7 +239,7 @@ func (c *client) Decode(token string, v interface{}) error {
 
 	err = json.Unmarshal(payloadJSON, &v)
 	if err != nil {
-		return err
+		return fmt.Errorf("jwt-go: could not decode claim intom BasePayload: %v", err)
 	}
 
 	return nil
