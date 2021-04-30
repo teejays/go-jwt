@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-var cl *jwtClient
+var cl *Client
 
 // InitDefaultClient initializes the JWT client
 func InitDefaultClient(secret string, lifespan time.Duration) error {
@@ -26,7 +26,7 @@ func InitDefaultClient(secret string, lifespan time.Duration) error {
 		return fmt.Errorf("lifespan cannot be zero")
 	}
 
-	newCl := jwtClient{secretKey: []byte(secret), lifespan: lifespan}
+	newCl := Client{secretKey: []byte(secret), lifespan: lifespan}
 	cl = &newCl
 
 	return nil
@@ -41,7 +41,7 @@ func IsDefaultClientInitialized() bool {
 	return true
 }
 
-func GetDefaultClient() (*jwtClient, error) {
+func GetDefaultClient() (*Client, error) {
 	if cl == nil {
 		return nil, ErrClientNotInitialized
 	}

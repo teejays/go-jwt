@@ -67,18 +67,18 @@ func (bc *BaseClaim) VerifyTimestamps() error {
 
 }
 
-type jwtClient struct {
+type Client struct {
 	secretKey []byte
 	lifespan  time.Duration
 }
 
-func NewClient(secret []byte) (*jwtClient, error) {
-	return &jwtClient{
+func NewClient(secret []byte) (*Client, error) {
+	return &Client{
 		secretKey: secret,
 	}, nil
 }
 
-func (c *jwtClient) CreateToken(claim Claim) (string, error) {
+func (c *Client) CreateToken(claim Claim) (string, error) {
 
 	baseClaim := claim.GetBaseClaim()
 
@@ -127,7 +127,7 @@ func (c *jwtClient) CreateToken(claim Claim) (string, error) {
 
 }
 
-func (c *jwtClient) getSignatureBase64(headerB64, claimB64 string) (string, error) {
+func (c *Client) getSignatureBase64(headerB64, claimB64 string) (string, error) {
 	// Create the Signature
 	// - step 1: header . payload
 	data := []byte(headerB64 + "." + claimB64)
@@ -143,7 +143,7 @@ func (c *jwtClient) getSignatureBase64(headerB64, claimB64 string) (string, erro
 	return signatureB64, nil
 }
 
-func (c *jwtClient) VerifyAndDecode(token string, claim Claim) error {
+func (c *Client) VerifyAndDecode(token string, claim Claim) error {
 	var err error
 
 	err = c.VerifySignature(token)
@@ -164,7 +164,7 @@ func (c *jwtClient) VerifyAndDecode(token string, claim Claim) error {
 	return nil
 }
 
-func (c *jwtClient) VerifySignature(token string) error {
+func (c *Client) VerifySignature(token string) error {
 
 	// Splity the token into three parts (header, payload, signature)
 	tokenP, err := getTokenParts(token)
@@ -188,7 +188,7 @@ func (c *jwtClient) VerifySignature(token string) error {
 
 }
 
-func (c *jwtClient) Decode(token string, v interface{}) error {
+func (c *Client) Decode(token string, v interface{}) error {
 
 	tokenP, err := getTokenParts(token)
 	if err != nil {
@@ -229,7 +229,7 @@ func getTokenParts(token string) (partedToken, error) {
 	return tokenP, nil
 }
 
-func (c *jwtClient) hash(message []byte) ([]byte, error) {
+func (c *Client) hash(message []byte) ([]byte, error) {
 	hash := hmac.New(sha256.New, c.secretKey)
 	_, err := hash.Write(message)
 	if err != nil {
