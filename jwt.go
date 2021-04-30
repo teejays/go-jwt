@@ -31,16 +31,25 @@ type Claim interface {
 
 // BaseClaim represents all the minimum required fields for a JWT claim, as per RFC 7519 standard.
 type BaseClaim struct {
+	ExternallBaseClaim
+	InternalBaseClaim
+}
+
+type ExternallBaseClaim struct {
 	// Issuer is the authority that generated the JWT
 	Issuer string `json:"iss"`
 	// Subject is the main entity which is using the JWT, e.g. user
-	Subject   string    `json:"sub"`
-	Audience  string    `json:"aud"`
+	Subject string `json:"sub"`
+	//Audience of a token is the intended recipient of the token. The audience value is a string -- typically, the base address of the resource being accessed, such as https://contoso.com.
+	Audience string `json:"aud"`
+	// UniqueID is a unique identifier for the JWT
+	UniqueID string `json:"jti"`
+}
+
+type InternalBaseClaim struct {
 	ExpireAt  time.Time `json:"exp"`
 	NotBefore time.Time `json:"nbf"`
 	IssuedAt  time.Time `json:"iat"`
-	// UniqueID is a unique identifier for the JWT
-	UniqueID string `json:"jti"`
 }
 
 // GetBaseClaim returns the BaseClaim type, which should contain all the
@@ -69,7 +78,6 @@ func (bc *BaseClaim) VerifyTimestamps() error {
 
 type Client struct {
 	secretKey []byte
-	lifespan  time.Duration
 }
 
 func NewClient(secret []byte) (*Client, error) {
@@ -78,8 +86,11 @@ func NewClient(secret []byte) (*Client, error) {
 	}, nil
 }
 
-func (c *Client) CreateToken(claim Claim) (string, error) {
+func (c *Client) CreateToken(claim Claim, lifespan time.Duration) (string, error) {
 
+	if lifespan < time.Second {
+		return "", fmt.Errorf("cannot create a JWT with lifespan less than a second")
+	}
 	baseClaim := claim.GetBaseClaim()
 
 	now := time.Now()
@@ -90,11 +101,11 @@ func (c *Client) CreateToken(claim Claim) (string, error) {
 	}
 
 	// Create the Payload
-	baseClaim.ExpireAt = now.Add(c.lifespan)
+	baseClaim.ExpireAt = now.Add(lifespan)
 	baseClaim.IssuedAt = now
 	baseClaim.NotBefore = now
 
-	clog.Debugf("JWT: Creating Token: Lifespan: %v", c.lifespan)
+	clog.Debugf("JWT: Creating Token: Lifespan: %s", lifespan)
 	clog.Debugf("JWT: Creating Token: Expiry: %v", baseClaim.ExpireAt)
 
 	// Convert Header to JSON and then base64
@@ -236,4 +247,10 @@ func (c *Client) hash(message []byte) ([]byte, error) {
 		return nil, err
 	}
 	return hash.Sum(message), nil
+}
+
+func Example() {
+	fmt.Println("lala!")
+	// Output:
+	// lala!
 }

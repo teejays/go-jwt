@@ -3,13 +3,12 @@ package jwt
 import (
 	"fmt"
 	"strings"
-	"time"
 )
 
 var cl *Client
 
 // InitDefaultClient initializes the JWT client
-func InitDefaultClient(secret string, lifespan time.Duration) error {
+func InitDefaultClient(secret string) error {
 
 	// Make sure we're not reinitializing the client
 	if cl != nil {
@@ -21,12 +20,7 @@ func InitDefaultClient(secret string, lifespan time.Duration) error {
 		return fmt.Errorf("secret key cannot be empty")
 	}
 
-	// Validate the lifespan
-	if lifespan < 0 {
-		return fmt.Errorf("lifespan cannot be zero")
-	}
-
-	newCl := Client{secretKey: []byte(secret), lifespan: lifespan}
+	newCl := Client{secretKey: []byte(secret)}
 	cl = &newCl
 
 	return nil
