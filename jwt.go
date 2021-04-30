@@ -67,54 +67,18 @@ func (bc *BaseClaim) VerifyTimestamps() error {
 
 }
 
-type client struct {
+type jwtClient struct {
 	secretKey []byte
 	lifespan  time.Duration
 }
 
-var cl *client
-
-// InitClient initializes the JWT client
-func InitClient(secret string, lifespan time.Duration) error {
-
-	// Make sure we're not reinitializing the client
-	if cl != nil {
-		return fmt.Errorf("JWT client is already initialized")
-	}
-
-	// Validate the secret
-	if strings.TrimSpace(secret) == "" {
-		return fmt.Errorf("secret key cannot be empty")
-	}
-
-	// Validate the lifespan
-	if lifespan < 0 {
-		return fmt.Errorf("lifespan cannot be zero")
-	}
-
-	newCl := client{secretKey: []byte(secret), lifespan: lifespan}
-	cl = &newCl
-
-	return nil
+func NewClient(secret []byte) (*jwtClient, error) {
+	return &jwtClient{
+		secretKey: secret,
+	}, nil
 }
 
-var ErrClientNotInitialized = fmt.Errorf("JWT client is not initialized")
-
-func IsClientInitialized() bool {
-	if cl == nil {
-		return false
-	}
-	return true
-}
-
-func GetClient() (*client, error) {
-	if cl == nil {
-		return nil, ErrClientNotInitialized
-	}
-	return cl, nil
-}
-
-func (c *client) CreateToken(claim Claim) (string, error) {
+func (c *jwtClient) CreateToken(claim Claim) (string, error) {
 
 	baseClaim := claim.GetBaseClaim()
 
@@ -163,7 +127,7 @@ func (c *client) CreateToken(claim Claim) (string, error) {
 
 }
 
-func (c *client) getSignatureBase64(headerB64, claimB64 string) (string, error) {
+func (c *jwtClient) getSignatureBase64(headerB64, claimB64 string) (string, error) {
 	// Create the Signature
 	// - step 1: header . payload
 	data := []byte(headerB64 + "." + claimB64)
@@ -179,7 +143,7 @@ func (c *client) getSignatureBase64(headerB64, claimB64 string) (string, error) 
 	return signatureB64, nil
 }
 
-func (c *client) VerifyAndDecode(token string, claim Claim) error {
+func (c *jwtClient) VerifyAndDecode(token string, claim Claim) error {
 	var err error
 
 	err = c.VerifySignature(token)
@@ -200,7 +164,7 @@ func (c *client) VerifyAndDecode(token string, claim Claim) error {
 	return nil
 }
 
-func (c *client) VerifySignature(token string) error {
+func (c *jwtClient) VerifySignature(token string) error {
 
 	// Splity the token into three parts (header, payload, signature)
 	tokenP, err := getTokenParts(token)
@@ -224,7 +188,7 @@ func (c *client) VerifySignature(token string) error {
 
 }
 
-func (c *client) Decode(token string, v interface{}) error {
+func (c *jwtClient) Decode(token string, v interface{}) error {
 
 	tokenP, err := getTokenParts(token)
 	if err != nil {
@@ -265,7 +229,7 @@ func getTokenParts(token string) (partedToken, error) {
 	return tokenP, nil
 }
 
-func (c *client) hash(message []byte) ([]byte, error) {
+func (c *jwtClient) hash(message []byte) ([]byte, error) {
 	hash := hmac.New(sha256.New, c.secretKey)
 	_, err := hash.Write(message)
 	if err != nil {
